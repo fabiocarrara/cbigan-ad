@@ -2,10 +2,9 @@ import tensorflow as tf
 import tensorflow.keras.backend as K
 
 def l1(x, y):
-    # x = K.reshape(x, (len(x), -1))
-    # y = K.reshape(y, (len(y), -1))
-    # return K.sum(K.abs(x - y), axis=1)
-    return K.sum(K.abs(x - y))  # LB
+    x = K.reshape(x, (len(x), -1))
+    y = K.reshape(y, (len(y), -1))
+    return K.sum(K.abs(x - y), axis=1)  # keep batch dimension
 
 # LB version
 def gradient_penalty(discriminator, x, x_gen, z, z_gen, training=True):
@@ -103,8 +102,8 @@ def train_step(images, generator, encoder, discriminator,
 
         # consistency losses
         # LB: no mean on batches
-        images_reconstruction_loss = l1(images, reconstructed_images)  # L_R
-        latent_reconstruction_loss = l1(latent, reconstructed_latent)  # L_R'
+        images_reconstruction_loss = K.sum(l1(images, reconstructed_images))  # L_R
+        latent_reconstruction_loss = K.sum(l1(latent, reconstructed_latent))  # L_R'
         # images_reconstruction_loss = K.mean(l1(images, reconstructed_images))  # L_R
         # latent_reconstruction_loss = K.mean(l1(latent, reconstructed_latent))  # L_R'
         consistency_loss = images_reconstruction_loss + latent_reconstruction_loss  # L_C
