@@ -14,7 +14,7 @@ import pandas as pd
 from mvtec_ad import textures, objects, get_data
 from model import make_generator, make_encoder, make_discriminator
 from losses import train_step
-from util import VideoSaver
+from util import str2bool, VideoSaver
     
 def train(args):
 
@@ -99,37 +99,25 @@ def train(args):
                 video_saver.generate_and_save(generator, encoder)
             
             if (step + 1) % 1000 == 0:
-                log.to_csv(f'log_{args.category}.csv', index=False)
-                checkpoint.save(file_prefix=f'ckpt/{args.category}/ckpt_{args.category}_iter{step}')
+                log.to_csv(log_file, index=False)
+                checkpoint.write(file_prefix=last_ckpt_path)
                 
                 mean_image_difference = np.mean(image_reconstruction_loss)
                 if mean_image_difference < best_metric:
                     best_metric = mean_image_difference
-                    checkpoint.write(file_prefix=f'ckpt/{args.category}/ckpt_{args.category}_best')
+                    checkpoint.write(file_prefix=best_ckpt_path)
                     image_reconstruction_loss.clear()
+                    
     except KeyboardInterrupt:
-        checkpoint.save(file_prefix=f'ckpt/{args.category}/ckpt_{args.category}_last')
+        checkpoint.write(file_prefix=last_ckpt_path)
     finally:
-        log.to_csv(f'log_{args.category}.csv', index=False)
+        log.to_csv(log_file, index=False)
         video_saver.close()
-
+        
 
 if __name__ == '__main__':
 
-    # utility for argparse
-    def str2bool(v):
-        if isinstance(v, bool):
-            return v
-        if v.lower() in ('yes', 'true', 't', 'y', '1'):
-            return True
-        elif v.lower() in ('no', 'false', 'f', 'n', '0'):
-            return False
-        else:
-            raise argparse.ArgumentTypeError('Boolean value expected.')
-
-
     categories = textures + objects
-
     parser = argparse.ArgumentParser(description='Train CBiGAN on MVTec AD',
                                      formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     # data params
