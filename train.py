@@ -16,7 +16,7 @@ from model import make_generator, make_encoder, make_discriminator
 from losses import train_step
 from util import str2bool, VideoSaver
     
-def train(args):
+def main(args):
 
     np.random.seed(args.seed)
     tf.random.set_seed(args.seed)
@@ -48,15 +48,24 @@ def train(args):
     # build optimizers
     generator_encoder_optimizer = O.Adam(args.lr, beta_1=args.ge_beta1, beta_2=args.ge_beta2)
     discriminator_optimizer = O.Adam(args.lr, beta_1=args.d_beta1, beta_2=args.d_beta2)
+
+    # for smoothing generator and encoder evolution
+    ema = tf.train.ExponentialMovingAverage(decay=0.999)
     
     # checkpointer
     checkpoint = tf.train.Checkpoint(generator=generator, encoder=encoder,
                                      discriminator=discriminator,
                                      generator_encoder_optimizer=generator_encoder_optimizer,
                                      discriminator_optimizer=discriminator_optimizer)
-                                     
+    best_ckpt_path = f'ckpt/{args.category}/ckpt_{args.category}_best'
+    last_ckpt_path = f'ckpt/{args.category}/ckpt_{args.category}_last'
+              
     # log stuff
     log = pd.DataFrame()
+    log_file = f'log_{args.category}.csv.gz'
+    best_metric = float('inf')
+    
+    # animate generation during training
     n_preview = 6
     train_batch = next(iter(train_dataset))[:n_preview]
     test_batch = next(iter(test_dataset))[0][:n_preview]
@@ -67,8 +76,7 @@ def train(args):
         test_batch = [x[i:i+args.patch_size, j:j+args.patch_size, :]
                       for x, (i, j) in zip(test_batch, patch_location)]
         test_batch = K.stack(test_batch)
-        
-    best_metric = float('inf')
+    
     video_out = f'{args.category}.mp4'
     video_saver = VideoSaver(train_batch, test_batch, latent_batch, video_out)
     
@@ -86,6 +94,13 @@ def train(args):
             losses, scores = train_step(image_batch, generator, encoder, discriminator,
                                         generator_encoder_optimizer, discriminator_optimizer,
                                         d_train, ge_train, alpha=args.alpha, gp_weight=args.gp_weight)
+            
+            if (step + 1) % 10 == 0:
+                ge_vars = generator.trainable_variables + encoder.trainable_variables
+                ema.apply(ge_vars)  # update exponential moving average
+                for v in ge_vars:  # assign to each variable its exponential moving average
+                    v = ema.average(v)
+            
             # tensor to numpy
             losses = {n: l.numpy() if l is not None else l for n, l in losses.items()}
             scores = {n: s.numpy() if s is not None else s for n, s in scores.items()}
@@ -156,4 +171,4 @@ if __name__ == '__main__':
     parser.add_argument('--seed', type=int, default=42, help='rng seed')
     
     args = parser.parse_args()
-    train(args)
+    main(args)
