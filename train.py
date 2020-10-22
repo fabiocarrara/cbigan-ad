@@ -11,7 +11,7 @@ from tqdm import tqdm
 import numpy as np
 import pandas as pd
 
-from mvtec_ad import textures, objects, get_data
+from mvtec_ad import textures, objects, get_train_data, get_test_data
 from model import make_generator, make_encoder, make_discriminator
 from losses import train_step
 from util import str2bool, VideoSaver
@@ -22,13 +22,18 @@ def train(args):
     tf.random.set_seed(args.seed)
 
     # get data
-    train_dataset, test_dataset = get_data(args.category,
-                                           image_size=args.image_size,
-                                           patch_size=args.patch_size,
-                                           batch_size=args.batch_size, 
-                                           n_batches=args.n_batches,
-                                           rotation_range=args.rotation_range,
-                                           seed=args.seed)
+    train_dataset = get_train_data(args.category,
+                                   image_size=args.image_size,
+                                   patch_size=args.patch_size,
+                                   batch_size=args.batch_size, 
+                                   n_batches=args.n_batches,
+                                   rotation_range=args.rotation_range,
+                                   seed=args.seed)
+
+    test_dataset, test_labels = get_test_data(args.category,
+                                              image_size=args.image_size,
+                                              patch_size=args.patch_size,
+                                              batch_size=args.batch_size)
     
     is_object = args.category in objects
     
@@ -57,14 +62,10 @@ def train(args):
     test_batch = next(iter(test_dataset))[0][:n_preview]
     latent_batch = tf.random.normal([n_preview, args.latent_size])
     
-    if not is_object:
-        patch_location = np.random.randint(0, image_size - patch_size, (n_preview, 2))
-        train_batch = [x[i:i+patch_size, j:j+patch_size, :]
-                      for x, (i, j) in zip(train_batch, patch_location)]
-        test_batch = [x[i:i+patch_size, j:j+patch_size, :]
+    if not is_object:  # take random patches from test images
+        patch_location = np.random.randint(0, args.image_size - args.patch_size, (n_preview, 2))
+        test_batch = [x[i:i+args.patch_size, j:j+args.patch_size, :]
                       for x, (i, j) in zip(test_batch, patch_location)]
-                      
-        train_batch = K.stack(train_batch)
         test_batch = K.stack(test_batch)
         
     best_metric = float('inf')

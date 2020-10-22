@@ -16,9 +16,8 @@ textures = ['carpet', 'grid', 'leather', 'tile', 'wood']
 objects = ['bottle', 'cable', 'capsule', 'hazelnut', 'metal_nut', 'pill', 'screw', 'toothbrush', 'transistor', 'zipper']
 
 
-def get_data(category, batch_size=32, image_size=128, patch_size=128, rotation_range=(0,0), n_batches=50_000, seed=42):
+def get_train_data(category, batch_size=32, image_size=128, patch_size=128, rotation_range=(0,0), n_batches=50_000, seed=42):
     train_data_dir = f'data/mvtec-ad/{category}/train/'
-    test_data_dir = f'data/mvtec-ad/{category}/test/'
 
     dataset_kwargs = dict(image_size=(image_size, image_size), batch_size=1, shuffle=False, seed=seed)
     rescale = P.Rescaling(scale=1./127.5, offset=-1)  # scale from [0, 255] to [-1, 1]
@@ -103,6 +102,19 @@ def get_data(category, batch_size=32, image_size=128, patch_size=128, rotation_r
         train_dataset = np.load(cache_file)
         train_dataset = tf.data.Dataset.from_tensor_slices(train_dataset)
 
+    ### shuffle, batch and prefetch
+    train_dataset = train_dataset.repeat().shuffle(10000).batch(batch_size).take(n_batches)
+    train_dataset = train_dataset.prefetch(buffer_size=AUTOTUNE)
+    
+    return train_dataset
+
+
+def get_test_data(category, batch_size=32, image_size=128, patch_size=128):
+    test_data_dir = f'data/mvtec-ad/{category}/test/'
+
+    dataset_kwargs = dict(image_size=(image_size, image_size), batch_size=batch_size, shuffle=False)
+    rescale = P.Rescaling(scale=1./127.5, offset=-1)  # scale from [0, 255] to [-1, 1]
+    
     ### test dataset
     # load and resize images (load also labels for test dataset)
     test_dataset = image_dataset_from_directory(test_data_dir, **dataset_kwargs)
@@ -110,21 +122,18 @@ def get_data(category, batch_size=32, image_size=128, patch_size=128, rotation_r
 
     # rescale pixel range, cache
     test_dataset = test_dataset.map(lambda x, y: (rescale(x), y), num_parallel_calls=AUTOTUNE)
-    test_dataset = test_dataset.unbatch().cache()
-
-    ### shuffle, batch and prefetch
-    train_dataset = train_dataset.repeat().shuffle(10000).batch(batch_size).take(n_batches)
-    test_dataset = test_dataset.batch(batch_size)
-
-    train_dataset = train_dataset.prefetch(buffer_size=AUTOTUNE)
+    test_dataset = test_dataset.cache()
     test_dataset = test_dataset.prefetch(buffer_size=AUTOTUNE)
     
-    return train_dataset, test_dataset
+    return test_dataset, test_labels
 
-  
+    
 if __name__ == '__main__':
-    train_ds, test_ds = get_data('leather', image_size=512, patch_size=64, rotation_range=(0,45))
+    train_ds = get_train_data('leather', image_size=512, patch_size=64, rotation_range=(0,45))
     sample_batch = next(iter(train_ds))
     print(sample_batch.shape)
     
+    test_ds, test_labels = get_test_data('leather', image_size=512, patch_size=64)
+    sample_batch, label_batch = next(iter(test_ds))
+    print(sample_batch.shape, label_batch.shape)
 
