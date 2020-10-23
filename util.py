@@ -18,12 +18,12 @@ def str2bool(v):
 
 class VideoSaver (object):
 
-    def __init__(self, train_samples, test_samples, latent_samples, out_file, fps=10):
+    def __init__(self, train_samples, test_samples, latent_samples, out_file, **writer_kw):
         self.train_samples = train_samples
         self.test_samples = test_samples
         self.latent_samples = latent_samples
         
-        self.writer = imageio.get_writer(out_file, fps=fps)
+        self.writer = imageio.get_writer(out_file, **writer_kw)
     
     def generate_and_save(self, gen, enc):
         

@@ -1,3 +1,6 @@
+import os
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '1'  # do not print tf INFO messages
+
 import argparse
 
 import tensorflow as tf
@@ -78,12 +81,14 @@ def main(args):
         test_batch = K.stack(test_batch)
     
     video_out = f'{args.category}.mp4'
-    video_saver = VideoSaver(train_batch, test_batch, latent_batch, video_out)
+    video_options = dict(fps=30, codec='libx265', quality=4)  # see imageio FFMPEG options
+    video_saver = VideoSaver(train_batch, test_batch, latent_batch, video_out, **video_options)
+    video_saver.generate_and_save(generator, encoder)
     
     # train loop
     try:
-        image_reconstruction_loss = []    
-        for step, image_batch in enumerate(tqdm(train_dataset)):
+        image_reconstruction_loss = []
+        for step, image_batch in enumerate(tqdm(train_dataset, desc=args.category)):
             if step == 0:  # only for tf.function to work
                 d_train = True
                 ge_train = True
