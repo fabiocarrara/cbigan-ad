@@ -18,7 +18,7 @@ from mvtec_ad import textures, objects, get_train_data, get_test_data
 from model import make_generator, make_encoder, make_discriminator
 from losses import train_step
 from score import get_discriminator_features_model, evaluate
-from util import str2bool, VideoSaver
+from util import VideoSaver
 
 def main(args):
 
@@ -158,9 +158,9 @@ if __name__ == '__main__':
     parser.add_argument('--channels', type=int, default=3, help='Multiplier for the number of channels in Conv2D layers')
     
     parser.add_argument('--ge-up', type=str, choices=('bilinear', 'transpose'), default='bilinear', help='Upsampling method to use in G')
-    parser.add_argument('--ge-bn', type=str2bool, nargs='?', const=True, default=False, help="Whether to use BatchNorm in G and E")
+    parser.add_argument('--ge-bn', type=str, choices=('batch', 'layer', 'instance', 'none'), default='none', help="Whether to use Normalization in G and E")
     parser.add_argument('--ge-act', type=str, choices=('relu', 'lrelu'), default='lrelu', help='Activation to use in G and E')
-    parser.add_argument('--d-bn', type=str2bool, nargs='?', const=True, default=False, help="Whether to use BatchNorm in D")
+    parser.add_argument('--d-bn', type=str, choices=('batch', 'layer', 'instance', 'none'), default='none', help="Whether to use Normalization in D")
     parser.add_argument('--d-act', type=str, choices=('relu', 'lrelu'), default='lrelu', help='Activation to use in D')
     
     # optimizer params

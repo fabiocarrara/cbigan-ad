@@ -13,7 +13,6 @@ import pandas as pd
 from mvtec_ad import textures, objects, get_train_data, get_test_data
 from model import make_generator, make_encoder, make_discriminator
 from losses import l1
-from util import str2bool
 
 
 def anomaly_score(generator, encoder, discriminator_features, images, patch_size, lambda_):
@@ -111,10 +110,11 @@ if __name__ == '__main__':
     parser.add_argument('--channels', type=int, default=3, help='Multiplier for the number of channels in Conv2D layers')
     
     parser.add_argument('--ge-up', type=str, choices=('bilinear', 'transpose'), default='bilinear', help='Upsampling method to use in G')
-    parser.add_argument('--ge-bn', type=str2bool, nargs='?', const=True, default=False, help="Whether to use BatchNorm in G and E")
+    parser.add_argument('--ge-bn', type=str, choices=('batch', 'layer', 'instance', 'none'), default='none', help="Whether to use Normalization in G and E")
     parser.add_argument('--ge-act', type=str, choices=('relu', 'lrelu'), default='lrelu', help='Activation to use in G and E')
-    parser.add_argument('--d-bn', type=str2bool, nargs='?', const=True, default=False, help="Whether to use BatchNorm in D")
+    parser.add_argument('--d-bn', type=str, choices=('batch', 'layer', 'instance', 'none'), default='none', help="Whether to use Normalization in D")
     parser.add_argument('--d-act', type=str, choices=('relu', 'lrelu'), default='lrelu', help='Activation to use in D')
+
     
     parser.add_argument('--batch-size', type=int, default=32, help='Batch size')    
     parser.add_argument('--lambda', type=float, default=0.1, help='weight of discriminator features when scoring')

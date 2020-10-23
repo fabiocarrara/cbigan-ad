@@ -1,13 +1,23 @@
 import tensorflow as tf
+import tensorflow_addons as tfa
 import tensorflow.keras.backend as K
 from tensorflow.keras import layers as L
 from tensorflow.keras.models import Model
 
 from functools import partial
 
-
 init = dict(kernel_initializer='he_normal')
 common = dict(padding='same', **init)
+bn_layers = {
+    'batch': L.BatchNormalization,
+    'layer': L.LayerNormalization,
+    'instance': tfa.layers.InstanceNormalization,
+    'none': lambda: (lambda x: x)  # complex way to say no-op
+}
+
+def get_bn_layer(bn='none'):
+    assert bn in bn_layers, f"Unsupported normalization layer {bn}"
+    return bn_layers[bn]
 
 # L.Layer implements identity by default
 def g_block(x, n_filters, upsample=True, upsample_type='bilinear', use_bias=True, bn=L.Layer, act=L.ReLU):
@@ -58,9 +68,9 @@ def d_block(x, n_filters, pool=True, use_bias=True, bn=L.Layer, act=L.ReLU):
     return x
     
 
-def make_generator(latent_size, channels=3, upsample_first=True, upsample_type='bilinear', bn=False, act='lrelu'):
+def make_generator(latent_size, channels=3, upsample_first=True, upsample_type='bilinear', bn='none', act='lrelu'):
     use_bias = not bn
-    bn = L.BatchNormalization if bn else lambda: (lambda x: x)  # complex way to say no-op
+    bn = get_bn_layer(bn)
     act = partial(L.LeakyReLU, alpha=0.2) if act == 'lrelu' else L.ReLU
     g_common = dict(upsample_type=upsample_type, use_bias=use_bias, bn=bn, act=act)
     
@@ -83,9 +93,9 @@ def make_generator(latent_size, channels=3, upsample_first=True, upsample_type='
     return Model(inputs=i, outputs=o, name='generator')
 
 
-def make_encoder(image_size, latent_size, channels=3, bn=False, act='lrelu'):
+def make_encoder(image_size, latent_size, channels=3, bn='none', act='lrelu'):
     use_bias = not bn
-    bn = L.BatchNormalization if bn else lambda: (lambda x: x)  # complex way to say no-op
+    bn = get_bn_layer(bn)
     act = partial(L.LeakyReLU, alpha=0.2) if act == 'lrelu' else L.ReLU
     e_common = dict(use_bias=use_bias, bn=bn, act=act)
     
@@ -107,9 +117,9 @@ def make_encoder(image_size, latent_size, channels=3, bn=False, act='lrelu'):
     return Model(inputs=i, outputs=o, name='encoder')
 
 
-def make_discriminator(image_size, latent_size, channels=3, bn=False, act='lrelu'):
+def make_discriminator(image_size, latent_size, channels=3, bn='none', act='lrelu'):
     use_bias = not bn
-    bn = L.BatchNormalization if bn else lambda: (lambda x: x)  # complex way to say no-op
+    bn = get_bn_layer(bn)
     act = partial(L.LeakyReLU, alpha=0.2) if act == 'lrelu' else L.ReLU
     d_common = dict(use_bias=use_bias, bn=bn, act=act)
     
@@ -147,11 +157,11 @@ def make_discriminator(image_size, latent_size, channels=3, bn=False, act='lrelu
     
 
 if __name__ == '__main__':
-    g = make_generator(64, 64, upsample_first=False)
-    e = make_encoder(64, 64)
-    d = make_discriminator(64, 64)
+    g = make_generator(64, 64, upsample_first=False, bn='batch')
+    e = make_encoder(64, 64, bn='instance')
+    d = make_discriminator(64, 64, bn='layer')
     
     g.summary()
     e.summary()
     d.summary()
-    import pdb; pdb.set_trace()
+    
