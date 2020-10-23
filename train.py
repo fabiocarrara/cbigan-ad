@@ -17,8 +17,9 @@ import pandas as pd
 from mvtec_ad import textures, objects, get_train_data, get_test_data
 from model import make_generator, make_encoder, make_discriminator
 from losses import train_step
+from score import get_discriminator_features_model, evaluate
 from util import str2bool, VideoSaver
-    
+
 def main(args):
 
     np.random.seed(args.seed)
@@ -28,7 +29,7 @@ def main(args):
     train_dataset = get_train_data(args.category,
                                    image_size=args.image_size,
                                    patch_size=args.patch_size,
-                                   batch_size=args.batch_size, 
+                                   batch_size=args.batch_size,
                                    n_batches=args.n_batches,
                                    rotation_range=args.rotation_range,
                                    seed=args.seed)
@@ -135,6 +136,11 @@ def main(args):
         log.to_csv(log_file, index=False)
         video_saver.close()
         
+    # score the test set
+    checkpoint.read(best_ckpt_path)
+    discriminator_features = get_discriminator_features_model(discriminator)
+    auc, balanced_accuracy = evaluate(generator, encoder, discriminator_features, test_dataset, test_labels, patch_size=args.patch_size)
+    print(f'{args.category}: AUC={auc}, BalAcc={balanced_accuracy}')
 
 if __name__ == '__main__':
 
