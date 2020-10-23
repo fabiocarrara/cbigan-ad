@@ -15,6 +15,42 @@ from tqdm import tqdm
 textures = ['carpet', 'grid', 'leather', 'tile', 'wood']
 objects = ['bottle', 'cable', 'capsule', 'hazelnut', 'metal_nut', 'pill', 'screw', 'toothbrush', 'transistor', 'zipper']
 
+def random_rotation_crop_no_edges(image, rotation_range, crop_size):
+    # Randomly rotates image, then crops out the edges, then performs random crop.
+    # Adapted from https://stackoverflow.com/questions/16702966/rotate-image-and-crop-out-black-borders
+
+    def _find_central_fraction_with_no_edges(w, h, angle):
+        quadrant = int(math.floor(angle / (math.pi / 2))) & 3
+        sign_alpha = angle if ((quadrant & 1) == 0) else math.pi - angle
+        alpha = (sign_alpha % math.pi + math.pi) % math.pi
+
+        bb_w = w * math.cos(alpha) + h * math.sin(alpha)
+        bb_h = w * math.sin(alpha) + h * math.cos(alpha)
+
+        gamma = math.atan2(bb_w, bb_w) if (w < h) else math.atan2(bb_w, bb_w)
+        delta = math.pi - alpha - gamma
+
+        length = h if (w < h) else w
+        d = length * math.cos(alpha)
+        a = d * math.sin(alpha) / math.sin(delta)
+
+        y = a * math.cos(gamma)
+        x = y * math.tan(gamma)
+
+        cw = bb_w - 2 * x
+        ch = bb_h - 2 * y
+
+        return (cw * ch) / (h * w)
+
+    b, h, w, c = image.shape
+
+    angle = 2. * np.pi * np.random.uniform(rotation_range[0], rotation_range[1])
+    rotated = tfa.image.rotate(image, angle, interpolation='BILINEAR')
+    central_fraction = _find_central_fraction_with_no_edges(w, h, angle)
+    noedges = tf.image.central_crop(rotated, central_fraction)
+    cropped = tf.image.random_crop(noedges, (b, crop_size, crop_size, c))
+    return cropped
+
 
 def get_train_data(category, batch_size=32, image_size=128, patch_size=128, rotation_range=(0,0), n_batches=50_000, seed=42):
     train_data_dir = f'data/mvtec-ad/{category}/train/'
@@ -26,7 +62,7 @@ def get_train_data(category, batch_size=32, image_size=128, patch_size=128, rota
     os.makedirs('cache', exist_ok=True)
     cache_file = f'cache/{category}_train_dataset_i{image_size}_p{patch_size}_r{rotation_range[0]}-{rotation_range[1]}_s{seed}.npy'
 
-    if not os.path.exists(cache_file):  # create cache
+    if not os.path.exists(cache_file):  # check cache (only texture are cached)
         # load and resize images
         train_dataset = image_dataset_from_directory(train_data_dir, label_mode=None, **dataset_kwargs)
         n_train_images = len(train_dataset)
@@ -47,56 +83,27 @@ def get_train_data(category, batch_size=32, image_size=128, patch_size=128, rota
         # replicate dataset
         train_dataset = train_dataset.repeat(50000 // n_train_images)
 
-        # apply random augmentation
-        def random_rotation_crop_no_edges(image, crop_size):
-            # Randomly rotates image, then crops out the edges, then performs random crop.
-            # Adapted from https://stackoverflow.com/questions/16702966/rotate-image-and-crop-out-black-borders
-
-            def _find_central_fraction_with_no_edges(w, h, angle):
-                quadrant = int(math.floor(angle / (math.pi / 2))) & 3
-                sign_alpha = angle if ((quadrant & 1) == 0) else math.pi - angle
-                alpha = (sign_alpha % math.pi + math.pi) % math.pi
-
-                bb_w = w * math.cos(alpha) + h * math.sin(alpha)
-                bb_h = w * math.sin(alpha) + h * math.cos(alpha)
-
-                gamma = math.atan2(bb_w, bb_w) if (w < h) else math.atan2(bb_w, bb_w)
-                delta = math.pi - alpha - gamma
-
-                length = h if (w < h) else w
-                d = length * math.cos(alpha)
-                a = d * math.sin(alpha) / math.sin(delta)
-
-                y = a * math.cos(gamma)
-                x = y * math.tan(gamma)
-
-                cw = bb_w - 2 * x
-                ch = bb_h - 2 * y
-
-                return (cw * ch) / (h * w)
-
-            b, h, w, c = image.shape
-
-            angle = 2. * np.pi * np.random.uniform(rotation_range[0], rotation_range[1])
-            rotated = tfa.image.rotate(image, angle, interpolation='BILINEAR')
-            central_fraction = _find_central_fraction_with_no_edges(w, h, angle)
-            noedges = tf.image.central_crop(rotated, central_fraction)
-            cropped = tf.image.random_crop(noedges, (b, crop_size, crop_size, c))
-            return cropped
-
-        def augmentation(x):
-            return tf.py_function(random_rotation_crop_no_edges, inp=[x, patch_size], Tout=tf.float32)
-
-        if category in textures:  # rotate, crop and cache only textures
+        # apply random rotation
+        if rotation_range[0] != 0 or rotation_range[1] != 0:
+            if category in textures:  # for textures: rotate and crop without edges
+                def augmentation(x):  # slow computation, we will cache this
+                    return tf.py_function(random_rotation_crop_no_edges,
+                                          inp=[x, rotation_range, patch_size], Tout=tf.float32)
+            else:  # for objects: rotate (reflect edges), no crop
+                factor = (rotation_range[0] / 360., rotation_range[1] / 360.)
+                # fill_mode='nearest' is available only in tf-nightly (2.4.0)
+                augmentation = P.RandomRotation(factor, fill_mode='nearest', seed=seed) 
+            
             train_dataset = train_dataset.shuffle(10000).batch(32)
             train_dataset = train_dataset.map(augmentation, num_parallel_calls=AUTOTUNE)
             train_dataset = train_dataset.unbatch()
-        
-            print('Creating cache for dataset:', cache_file)
-            train_dataset = tqdm(train_dataset.as_numpy_iterator())
-            train_dataset = np.stack(list(train_dataset))
-            np.save(cache_file, train_dataset)
-            train_dataset = tf.data.Dataset.from_tensor_slices(train_dataset)
+            
+            if category in textures: # for textures: cache the augmented dataset
+                print('Creating cache for dataset:', cache_file)
+                train_dataset = tqdm(train_dataset.as_numpy_iterator())
+                train_dataset = np.stack(list(train_dataset))
+                np.save(cache_file, train_dataset)
+                train_dataset = tf.data.Dataset.from_tensor_slices(train_dataset)
     else:
         print('Loading dataset from cache:', cache_file)
         train_dataset = np.load(cache_file)
