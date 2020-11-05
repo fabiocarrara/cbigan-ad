@@ -80,8 +80,10 @@ def get_train_data(category, batch_size=32, image_size=128, patch_size=128, rota
         mean_image /= n_train_images
         """
 
-        # replicate dataset
-        train_dataset = train_dataset.repeat(50000 // n_train_images)
+        # replicate dataset to get roughly 50000 augmented images
+        num_repeats = 50000 // n_train_images
+        n_total = num_repeats * n_train_images
+        train_dataset = train_dataset.repeat(num_repeats)
 
         # apply random rotation
         if rotation_range[0] != 0 or rotation_range[1] != 0:
@@ -100,7 +102,7 @@ def get_train_data(category, batch_size=32, image_size=128, patch_size=128, rota
             
             if category in textures: # for textures: cache the augmented dataset
                 print('Creating cache for dataset:', cache_file)
-                train_dataset = tqdm(train_dataset.as_numpy_iterator())
+                train_dataset = tqdm(train_dataset.as_numpy_iterator(), total=n_total)
                 train_dataset = np.stack(list(train_dataset))
                 np.save(cache_file, train_dataset)
                 train_dataset = tf.data.Dataset.from_tensor_slices(train_dataset)
