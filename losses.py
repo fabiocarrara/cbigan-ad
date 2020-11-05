@@ -6,6 +6,7 @@ def l1(x, y):
     y = K.reshape(y, (len(y), -1))
     return K.sum(K.abs(x - y), axis=1)  # keep batch dimension
 
+"""
 # LB version
 def gradient_penalty(discriminator, x, x_gen, z, z_gen, training=True):
     with tf.GradientTape() as t:
@@ -16,7 +17,7 @@ def gradient_penalty(discriminator, x, x_gen, z, z_gen, training=True):
     gradient_pen = K.sum(K.square(gradients), axis=1)  # compute gradient norm^2
     return K.mean(gradient_pen)  # mean on batch    
 
-"""
+
 # WGAN-GP version (only dD/dx with interpolated inputs)
 def gradient_penalty(discriminator, x, x_gen, z, z_gen, training):
     z_epsilon = K.random_uniform((len(x), 1), 0.0, 1.0)
@@ -36,9 +37,10 @@ def gradient_penalty(discriminator, x, x_gen, z, z_gen, training):
     # norm_penalty = K.square(dx_norm - 1)  # norm should be 1 (two-sided GP)
     return K.mean(norm_penalty)  # mean on batch
 
+"""   
 
 # WGAN-GP version (dD/dx and dD/dz both regularized on interpolated inputs)
-def gradient_penalty(discriminator, x, x_gen, z, z_gen, training=training):
+def gradient_penalty(discriminator, x, x_gen, z, z_gen, training):
     z_epsilon = K.random_uniform((len(x), 1), 0.0, 1.0)
     x_epsilon = K.reshape(z_epsilon, (len(x), 1, 1, 1))
 
@@ -59,7 +61,7 @@ def gradient_penalty(discriminator, x, x_gen, z, z_gen, training=training):
     # norm_penalty = K.square(K.relu(grads_norm - 1))  # norm should be <=1 (one-sided GP) 
     norm_penalty = K.square(grads_norm - 1)  # norm should be 1 (two-sided GP)
     return K.mean(norm_penalty)  # mean on batch
-"""   
+
 
 @tf.function
 def train_step(images, generator, encoder, discriminator,
@@ -84,8 +86,8 @@ def train_step(images, generator, encoder, discriminator,
         fake_score = discriminator([generated_images, latent], training=d_train)  # D(G(z), z)
         
         ### discriminator losses
-        discriminator_loss = K.mean(K.relu(1. + fake_score) + K.relu(1. - real_score))  # L_D # LB
-        # discriminator_loss = K.mean(fake_score - real_score)  # L_D
+        # discriminator_loss = K.mean(K.relu(1. + fake_score) + K.relu(1. - real_score))  # L_D # LB
+        discriminator_loss = K.mean(fake_score - real_score)  # L_D
 
         # gradient penalty regularization
         # gradient_penalty_loss = gradient_penalty(fake_score, generated_images, d_tape)
