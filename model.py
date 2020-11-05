@@ -6,7 +6,7 @@ from tensorflow.keras.models import Model
 
 from functools import partial
 
-init = dict(kernel_initializer='he_normal')
+init = dict() # kernel_initializer='he_normal')
 common = dict(padding='same', **init)
 bn_layers = {
     'batch': L.BatchNormalization,
