@@ -91,7 +91,9 @@ def main(args):
     checkpoint.read(f'ckpt/{args.category}/ckpt_{args.category}_best').expect_partial()
                                      
     discriminator_features = get_discriminator_features_model(discriminator)
-    auc, balanced_accuracy = evaluate(generator, encoder, discriminator_features, test_dataset, test_labels, patch_size=args.patch_size)
+    auc, balanced_accuracy = evaluate(generator, encoder, discriminator_features,
+                                      test_dataset, test_labels,
+                                      patch_size=args.patch_size, lambda_=args.lambda_)
     print(f'{args.category}: AUC={auc}, BalAcc={balanced_accuracy}')
 
 
@@ -117,7 +119,7 @@ if __name__ == '__main__':
 
     
     parser.add_argument('--batch-size', type=int, default=32, help='Batch size')    
-    parser.add_argument('--lambda', type=float, default=0.1, help='weight of discriminator features when scoring')
+    parser.add_argument('--lambda', type=float, dest='lambda_', default=0.1, help='weight of discriminator features when scoring')
     
     args = parser.parse_args()
     main(args)
