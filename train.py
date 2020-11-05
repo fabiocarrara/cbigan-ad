@@ -8,7 +8,7 @@ import tensorflow.keras.backend as K
 from tensorflow.keras import layers as L
 from tensorflow.keras import optimizers as O
 
-# from sklearn import metrics
+from expman import Experiment
 from tqdm import tqdm
 
 import numpy as np
@@ -21,6 +21,10 @@ from score import get_discriminator_features_model, evaluate
 from util import VideoSaver
 
 def main(args):
+
+    # do not track lambda param, it can be changed after train
+    exp = Experiment(args, ignore=('lambda_',))
+    print(exp)
 
     np.random.seed(args.seed)
     tf.random.set_seed(args.seed)
@@ -38,9 +42,9 @@ def main(args):
                                               image_size=args.image_size,
                                               patch_size=args.patch_size,
                                               batch_size=args.batch_size)
-    
+
     is_object = args.category in objects
-    
+
     # build models
     generator = make_generator(args.latent_size, channels=args.channels,
                                upsample_first=is_object, upsample_type=args.ge_up,
@@ -61,42 +65,45 @@ def main(args):
                                      discriminator=discriminator,
                                      generator_encoder_optimizer=generator_encoder_optimizer,
                                      discriminator_optimizer=discriminator_optimizer)
-    best_ckpt_path = f'ckpt/{args.category}/ckpt_{args.category}_best'
-    last_ckpt_path = f'ckpt/{args.category}/ckpt_{args.category}_last'
-              
+    best_ckpt_path = exp.ckpt(f'ckpt_{args.category}_best')
+    last_ckpt_path = exp.ckpt(f'ckpt_{args.category}_last')
+
     # log stuff
-    log = pd.DataFrame()
-    log_file = f'log_{args.category}.csv.gz'
-    best_metric = float('inf')
-    
+    log, log_file = exp.require_csv(f'log_{args.category}.csv.gz')
+    metrics, metrics_file = exp.require_csv(f'metrics_{args.category}.csv')
+    best_metric = 0.
+    best_recon = float('inf')
+    best_recon_file = exp.path_to(f'best_recon_{args.category}.png')
+    last_recon_file = exp.path_to(f'last_recon_{args.category}.png')
+
     # animate generation during training
     n_preview = 6
     train_batch = next(iter(train_dataset))[:n_preview]
     test_batch = next(iter(test_dataset))[0][:n_preview]
     latent_batch = tf.random.normal([n_preview, args.latent_size])
-    
+
     if not is_object:  # take random patches from test images
         patch_location = np.random.randint(0, args.image_size - args.patch_size, (n_preview, 2))
         test_batch = [x[i:i+args.patch_size, j:j+args.patch_size, :]
                       for x, (i, j) in zip(test_batch, patch_location)]
         test_batch = K.stack(test_batch)
-    
-    video_out = f'{args.category}.mp4'
+
+    video_out = exp.path_to(f'{args.category}.mp4')
     video_options = dict(fps=30, codec='libx265', quality=4)  # see imageio FFMPEG options
     video_saver = VideoSaver(train_batch, test_batch, latent_batch, video_out, **video_options)
     video_saver.generate_and_save(generator, encoder)
-    
+
     # train loop
+    progress = tqdm(train_dataset, desc=args.category)
     try:
-        image_reconstruction_loss = []
-        for step, image_batch in enumerate(tqdm(train_dataset, desc=args.category)):
-            if step == 0:  # only for tf.function to work
+        for step, image_batch in enumerate(progress, start=1):
+            if step == 1:  # only for JIT compilation (tf.function) to work
                 d_train = True
                 ge_train = True
             else:
-                d_train = (step % (args.d_iter + 1)) != args.d_iter  # True in [0, d_iter-1]
-                ge_train = not d_train  # True when step == d_iter
-                
+                d_train = (step % (args.d_iter + 1)) != 0  # True in [1, d_iter]
+                ge_train = not d_train  # True when step == d_iter + 1
+
             losses, scores = train_step(image_batch, generator, encoder, discriminator,
                                         generator_encoder_optimizer, discriminator_optimizer,
                                         d_train, ge_train, alpha=args.alpha, gp_weight=args.gp_weight)
@@ -106,11 +113,11 @@ def main(args):
                 ema.apply(ge_vars)  # update exponential moving average
                 for v in ge_vars:  # assign to each variable its exponential moving average
                     v = ema.average(v)
-            
+
             # tensor to numpy
             losses = {n: l.numpy() if l is not None else l for n, l in losses.items()}
             scores = {n: s.numpy() if s is not None else s for n, s in scores.items()}
-            
+
             # log step metrics
             entry = {'step': step, 'timestamp': pd.to_datetime('now'), **losses, **scores}
             log = log.append(entry, ignore_index=True)
@@ -138,8 +145,10 @@ def main(args):
         
     # score the test set
     checkpoint.read(best_ckpt_path)
-    discriminator_features = get_discriminator_features_model(discriminator)
-    auc, balanced_accuracy = evaluate(generator, encoder, discriminator_features, test_dataset, test_labels, patch_size=args.patch_size)
+    
+    auc, balanced_accuracy = evaluate(generator, encoder, discriminator_features,
+                                      test_dataset, test_labels,
+                                      patch_size=args.patch_size, lambda_=args.lambda_)
     print(f'{args.category}: AUC={auc}, BalAcc={balanced_accuracy}')
 
 if __name__ == '__main__':
@@ -178,7 +187,7 @@ if __name__ == '__main__':
     parser.add_argument('--d-iter', type=int, default=1, help='Number of times D trains more than G and E')
     
     # other parameters
-    parser.add_argument('--lambda', type=float, default=0.1, help='weight of discriminator features when scoring')
+    parser.add_argument('--lambda', type=float, dest='lambda_', default=0.1, help='weight of discriminator features when scoring')
     parser.add_argument('--seed', type=int, default=42, help='rng seed')
     
     args = parser.parse_args()
