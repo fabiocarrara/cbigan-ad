@@ -4,6 +4,7 @@ os.environ['TF_CPP_MIN_LOG_LEVEL'] = '1'  # do not print tf INFO messages
 import argparse
 
 import tensorflow as tf
+# import tensorflow_addons as tfa
 import tensorflow.keras.backend as K
 from tensorflow.keras import layers as L
 from tensorflow.keras import optimizers as O
@@ -11,6 +12,7 @@ from tensorflow.keras import optimizers as O
 from expman import Experiment
 from tqdm import tqdm
 
+import imageio
 import numpy as np
 import pandas as pd
 
@@ -53,13 +55,16 @@ def main(args):
                            bn=args.ge_bn, act=args.ge_act)
     discriminator = make_discriminator(args.patch_size, args.latent_size, channels=args.channels,
                                        bn=args.d_bn, act=args.d_act)
+    # feature extractor model for evaluation
+    discriminator_features = get_discriminator_features_model(discriminator)
+    
     # build optimizers
     generator_encoder_optimizer = O.Adam(args.lr, beta_1=args.ge_beta1, beta_2=args.ge_beta2)
     discriminator_optimizer = O.Adam(args.lr, beta_1=args.d_beta1, beta_2=args.d_beta2)
 
     # for smoothing generator and encoder evolution
-    ema = tf.train.ExponentialMovingAverage(decay=0.999)
-    
+    ema = tf.train.ExponentialMovingAverage(decay=args.ge_decay)
+
     # checkpointer
     checkpoint = tf.train.Checkpoint(generator=generator, encoder=encoder,
                                      discriminator=discriminator,
@@ -107,8 +112,8 @@ def main(args):
             losses, scores = train_step(image_batch, generator, encoder, discriminator,
                                         generator_encoder_optimizer, discriminator_optimizer,
                                         d_train, ge_train, alpha=args.alpha, gp_weight=args.gp_weight)
-            
-            if (step + 1) % 10 == 0:
+
+            if (args.ge_decay > 0) and (step % 10 == 0):
                 ge_vars = generator.trainable_variables + encoder.trainable_variables
                 ema.apply(ge_vars)  # update exponential moving average
                 for v in ge_vars:  # assign to each variable its exponential moving average
@@ -122,21 +127,39 @@ def main(args):
             entry = {'step': step, 'timestamp': pd.to_datetime('now'), **losses, **scores}
             log = log.append(entry, ignore_index=True)
 
-            image_reconstruction_loss.append(losses['images_reconstruction_loss'])
-
-            if (step + 1) % 100 == 0:
-                video_saver.generate_and_save(generator, encoder)
-            
-            if (step + 1) % 1000 == 0:
+            if step % 100 == 0:
+                preview = video_saver.generate_and_save(generator, encoder)
+                
+            if step % 1000 == 0:
                 log.to_csv(log_file, index=False)
                 checkpoint.write(file_prefix=last_ckpt_path)
                 
-                mean_image_difference = np.mean(image_reconstruction_loss)
-                if mean_image_difference < best_metric:
-                    best_metric = mean_image_difference
+                auc, balanced_accuracy = evaluate(generator, encoder, discriminator_features,
+                                                  test_dataset, test_labels,
+                                                  patch_size=args.patch_size, lambda_=args.lambda_)
+                                                  
+                entry = {'step': step, 'auc': auc, 'balanced_accuracy': balanced_accuracy}         
+                metrics = metrics.append(entry, ignore_index=True)
+                metrics.to_csv(metrics_file, index=False)
+                
+                if auc > best_metric:
+                    best_metric = auc
                     checkpoint.write(file_prefix=best_ckpt_path)
-                    image_reconstruction_loss.clear()
-                    
+                
+                # save last image to inspect it during training
+                imageio.imwrite(last_recon_file, preview)
+                
+                recon = losses['images_reconstruction_loss']
+                if recon < best_recon:
+                    best_recon = recon
+                    imageio.imwrite(best_recon_file, preview)
+                
+                progress.set_postfix({
+                    'AUC': f'{auc:.1%}',
+                    'BalAcc': f'{balanced_accuracy:.1%}',
+                    'BestAUC': f'{best_metric:.1%}',
+                })
+
     except KeyboardInterrupt:
         checkpoint.write(file_prefix=last_ckpt_path)
     finally:
@@ -166,6 +189,7 @@ if __name__ == '__main__':
     parser.add_argument('--latent-size', type=int, default=64, help='Latent variable dimensionality')
     parser.add_argument('--channels', type=int, default=3, help='Multiplier for the number of channels in Conv2D layers')
     
+    parser.add_argument('--ge-decay', type=float, default=0.999, help='Moving average decay for paramteres of G and E')
     parser.add_argument('--ge-up', type=str, choices=('bilinear', 'transpose'), default='bilinear', help='Upsampling method to use in G')
     parser.add_argument('--ge-bn', type=str, choices=('batch', 'layer', 'instance', 'none'), default='none', help="Whether to use Normalization in G and E")
     parser.add_argument('--ge-act', type=str, choices=('relu', 'lrelu'), default='lrelu', help='Activation to use in G and E')

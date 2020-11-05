@@ -48,8 +48,7 @@ class VideoSaver (object):
         image = ((image + 1) * 127.5).astype(np.uint8)
         self.writer.append_data(image)
         
-        # save last image to inspect it during training
-        imageio.imwrite('preview.png', image)
+        return image
     
     def close(self):
         self.writer.close()
