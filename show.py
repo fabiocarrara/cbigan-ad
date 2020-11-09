@@ -126,23 +126,14 @@ def plot_log(args):
             plt.close(fig)
 
 
-def print_scores(args):
-    
-    exps = expman.gather(args.run)
-    exps = expman.filter(args.filter, exps)
-    
+def _get_scores(exps):
+        
     metrics = expman.collect_all(exps, 'metrics_*.csv')
     
-    print('Common Parameters')
-    print('=================')
     fixed_cols = metrics.nunique() == 1
     fixed_params = metrics.loc[0, fixed_cols]
-    print(fixed_params)
-    print('=================')
-    print()
     
-    print('Run Metrics')
-    print('=================')
+    
     # get variable cols & select the best based on metrics
     results = metrics.loc[:, ~fixed_cols]
     best = results.groupby('exp_id').auc.idxmax()
@@ -158,13 +149,8 @@ def print_scores(args):
     results.type = pd.Categorical(results.type, ['texture', 'object', 'mean'])
     results.category = pd.Categorical(results.category, textures + objects + ['mean'])
     results = results.set_index(['type', 'category']).sort_index()
-
-    print(results)
-    print('=================')
-    print()
     
-    print('Best Metrics')
-    print('=================')
+
     table = results.pivot_table(values=['balanced_accuracy', 'auc'], columns=['type', 'category'])
     
     textures_mean = table['texture'].mean(axis=1)
@@ -176,10 +162,51 @@ def print_scores(args):
     table.loc[:, ('mean', 'mean')] = overall_mean
     
     table = table.sort_index(axis=1)
+    
+    return fixed_params, results, table
+
+
+def print_scores(args):
+    exps = expman.gather(args.run)
+    exps = expman.filter(args.filter, exps)
+    
+    fixed_params, results, table = _get_scores(exps)
+
+    print('Common Parameters')
+    print('=================')
+    print(fixed_params)
+    print('=================')
+    print()
+    print('Run Metrics')
+    print('=================')
+    print(results)
+    print('=================')
+    print()
+    print('Best Metrics')
+    print('=================')
     with pd.option_context('display.float_format', '{:.2f}'.format):
         print(table)
     print('=================')
     print()
+
+
+def compare(args):
+    
+    exps1 = expman.gather(args.run1)
+    exps2 = expman.gather(args.run2)
+    
+    exps1 = expman.filter(args.filter, exps1)
+    exps2 = expman.filter(args.filter, exps2)
+    
+    fixed_params1, results1, table1 = _get_scores(exps1)
+    fixed_params2, results2, table2 = _get_scores(exps2)
+    
+    with pd.option_context('display.float_format', '{:.2f}'.format):
+        print(table2)
+        print(table1)
+    with pd.option_context('display.float_format', '{:.1%}'.format):
+        print(table2 - table1)
+    
 
 
 if __name__ == '__main__':
@@ -195,6 +222,11 @@ if __name__ == '__main__':
     parser_score = subparsers.add_parser('score')
     parser_score.add_argument('run', default='runs/')
     parser_score.set_defaults(func=print_scores)
+    
+    parser_cmp = subparsers.add_parser('cmp')
+    parser_cmp.add_argument('run1', default='runs/')
+    parser_cmp.add_argument('run2', default='runs/')
+    parser_cmp.set_defaults(func=compare)
     
     args = parser.parse_args()
     args.func(args)
