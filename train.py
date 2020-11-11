@@ -99,7 +99,7 @@ def main(args):
     video_saver.generate_and_save(generator, encoder)
 
     # train loop
-    progress = tqdm(train_dataset, desc=args.category)
+    progress = tqdm(train_dataset, desc=args.category, dynamic_ncols=True)
     try:
         for step, image_batch in enumerate(progress, start=1):
             if step == 1:  # only for JIT compilation (tf.function) to work
