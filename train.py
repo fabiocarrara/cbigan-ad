@@ -102,11 +102,12 @@ def main(args):
     progress = tqdm(train_dataset, desc=args.category, dynamic_ncols=True)
     try:
         for step, image_batch in enumerate(progress, start=1):
-            if step == 1:  # only for JIT compilation (tf.function) to work
+            if step == 1 or args.d_iter == 0:  # only for JIT compilation (tf.function) to work
                 d_train = True
                 ge_train = True
             else:
-                d_train = (step % (args.d_iter + 1)) != 0  # True in [1, d_iter]
+                n_iter = step % (abs(args.d_iter) + 1)  # can be in [0, d_iter]
+                d_train = (n_iter != 0) if (args.d_iter > 0) else (n_iter == 0)  # True in [1, d_iter]
                 ge_train = not d_train  # True when step == d_iter + 1
 
             losses, scores = train_step(image_batch, generator, encoder, discriminator,
@@ -208,7 +209,7 @@ if __name__ == '__main__':
     parser.add_argument('--alpha', type=float, default=1e-4, help='Consistency loss weight')
     parser.add_argument('--gp-weight', type=float, default=2.5, help='Gradient penalty weight')
     
-    parser.add_argument('--d-iter', type=int, default=1, help='Number of times D trains more than G and E')
+    parser.add_argument('--d-iter', type=int, default=1, help='Number of times D trains more than G and E (or viceversa using negative values; 0 = simultaneous step)')
     
     # other parameters
     parser.add_argument('--lambda', type=float, dest='lambda_', default=0.1, help='weight of discriminator features when scoring')
