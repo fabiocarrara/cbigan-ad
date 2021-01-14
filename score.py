@@ -1,4 +1,5 @@
 import argparse
+import expman
 
 import tensorflow as tf
 import tensorflow.keras.backend as K
@@ -17,7 +18,7 @@ from losses import l1
 
 def anomaly_score(generator, encoder, discriminator_features, images, patch_size, lambda_):
     
-    def _anomaly_score(images):
+    def _reconstruction_errors(images):
         latent = encoder(images, training=False)  # E(x)
         reconstructed_images = generator(latent, training=False)  # G(E(x))
 
@@ -27,17 +28,21 @@ def anomaly_score(generator, encoder, discriminator_features, images, patch_size
         pixel_distance = l1(images, reconstructed_images)  # L_R
         features_distance = l1(features, reconstructed_features)  # L_f_D
 
+        return pixel_distance, features_distance
+
+    def _anomaly_score(pixel_distance, features_distance, lambda_):
         return (1 - lambda_) * pixel_distance + lambda_ * features_distance
     
     # compute in patches
     b, h, w, c = images.shape
-    scores = [ _anomaly_score(images[:, y:y+patch_size, x:x+patch_size, :])
+    distances = [ _reconstruction_errors(images[:, y:y+patch_size, x:x+patch_size, :])
         for y in range(0, h, patch_size)
         for x in range(0, w, patch_size)
     ]
 
-    scores = K.stack(scores, axis=1)  # b x num_patches
-    scores = K.max(scores, axis=1)  # take the max score as anomaly score
+    pixel_distances, features_distances = K.stack(distances, axis=2)  # 2 x b x num_patches
+    scores = [_anomaly_score(pixel_distances, features_distances, lamb) for lamb in lambda_] # l x b x num_patches
+    scores = K.max(scores, axis=2)  # take the max score among patches as anomaly score
     return scores
 
 
@@ -47,79 +52,100 @@ def get_discriminator_features_model(discriminator, layer=-65):
     return discriminator_features
     
     
-def evaluate(generator, encoder, discriminator_features, test_dataset, test_labels, patch_size=64, lambda_=0.1):
+def evaluate(generator, encoder, discriminator_features, test_dataset, test_labels, patch_size=64, lambda_=(0.1,)):
+    return_scalar = False
+    if not isinstance(lambda_, (tuple, list)):
+        lambda_ = (lambda_,)
+        return_scalar = True
+
     scores, labels = [], []
 
     good_label = test_labels.index('good')
     def binarize_labels(labels):
-        return labels == good_label
+        return labels != good_label
 
-    for batch_images, batch_labels in tqdm(test_dataset):
+    for batch_images, batch_labels in tqdm(test_dataset, leave=False):
         scores.append( anomaly_score(generator, encoder, discriminator_features, batch_images, patch_size, lambda_).numpy() )
         labels.append( binarize_labels(batch_labels).numpy() )
 
-    scores = np.concatenate(scores)
-    labels = np.concatenate(labels)
-    
-    fpr, tpr, thr = metrics.roc_curve(labels, scores)
-    balanced_accuracy = np.max((tpr + (1 - fpr)) / 2)
-    auc = metrics.auc(fpr, tpr)
-    
+    scores = np.concatenate(scores, axis=1) # l x n
+    labels = np.concatenate(labels) # n
+
+    auc, balanced_accuracy = [], []
+    for s in scores:
+        fpr, tpr, thr = metrics.roc_curve(labels, s)
+        balanced_accuracy.append( np.max((tpr + (1 - fpr)) / 2) )
+        auc.append( metrics.auc(fpr, tpr) )
+
+    auc = auc[0] if return_scalar else auc
+    balanced_accuracy = balanced_accuracy[0] if return_scalar else balanced_accuracy
+
     return auc, balanced_accuracy
 
 
 def main(args):
+
+    exp = expman.from_dir(args.run)
+    params = exp.params
+
+    batch_size = args.batch_size if args.batch_size else params.batch_size
+    is_object = params.category in objects
+
     # get data
-    test_dataset, test_labels = get_test_data(args.category,
-                                              image_size=args.image_size,
-                                              patch_size=args.patch_size,
-                                              batch_size=args.batch_size)
-    
-    is_object = args.category in objects
+    test_dataset, test_labels = get_test_data(params.category,
+                                              image_size=params.image_size,
+                                              patch_size=params.patch_size,
+                                              batch_size=batch_size)
     
     # build models
-    generator = make_generator(args.latent_size, channels=args.channels,
-                               upsample_first=is_object, upsample_type=args.ge_up,
-                               bn=args.ge_bn, act=args.ge_act)
-    encoder = make_encoder(args.patch_size, args.latent_size, channels=args.channels,
-                           bn=args.ge_bn, act=args.ge_act)
-    discriminator = make_discriminator(args.patch_size, args.latent_size, channels=args.channels,
-                                       bn=args.d_bn, act=args.d_act)
+    generator = make_generator(params.latent_size,
+                               channels=params.channels,
+                               upsample_first=is_object,
+                               upsample_type=params.ge_up,
+                               bn=params.ge_bn,
+                               act=params.ge_act)
+
+    encoder = make_encoder(params.patch_size,
+                           params.latent_size,
+                           channels=params.channels,
+                           bn=params.ge_bn,
+                           act=params.ge_act)
+
+    discriminator = make_discriminator(params.patch_size,
+                                       params.latent_size,
+                                       channels=params.channels,
+                                       bn=params.d_bn,
+                                       act=params.d_act)
     
     # checkpointer
     checkpoint = tf.train.Checkpoint(generator=generator, encoder=encoder, discriminator=discriminator)
-    checkpoint.read(f'ckpt/{args.category}/ckpt_{args.category}_best').expect_partial()
+    ckpt_suffix = 'best' if args.best else 'last'
+    ckpt_path = exp.ckpt(f'ckpt_{params.category}_{ckpt_suffix}')
+    checkpoint.read(ckpt_path).expect_partial()
                                      
     discriminator_features = get_discriminator_features_model(discriminator)
     auc, balanced_accuracy = evaluate(generator, encoder, discriminator_features,
                                       test_dataset, test_labels,
-                                      patch_size=args.patch_size, lambda_=args.lambda_)
-    print(f'{args.category}: AUC={auc}, BalAcc={balanced_accuracy}')
+                                      patch_size=params.patch_size, lambda_=args.lambda_)
+
+    # print(f'{params.category}: AUC={auc}, BalAcc={balanced_accuracy}')
+    index = pd.Index(args.lambda_, name='lambda')
+    table = pd.DataFrame({'auc': auc, 'balanced_accuracy': balanced_accuracy}, index=index)
+    print(table)
 
 
 if __name__ == '__main__':
-
+    default_lambdas = (0. , 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.)
     categories = textures + objects
     parser = argparse.ArgumentParser(description='Score MVTec AD Test Datasets',
                                      formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-    # data params
-    parser.add_argument('category', type=str, choices=categories, help='MVTec-AD item category')
-    parser.add_argument('--image-size', type=int, default=128, help='Resize image to this size')
-    parser.add_argument('--patch-size', type=int, default=128, help='Extract patches of this size')
-    
-    # model params
-    parser.add_argument('--latent-size', type=int, default=64, help='Latent variable dimensionality')
-    parser.add_argument('--channels', type=int, default=3, help='Multiplier for the number of channels in Conv2D layers')
-    
-    parser.add_argument('--ge-up', type=str, choices=('bilinear', 'transpose'), default='bilinear', help='Upsampling method to use in G')
-    parser.add_argument('--ge-bn', type=str, choices=('batch', 'layer', 'instance', 'none'), default='none', help="Whether to use Normalization in G and E")
-    parser.add_argument('--ge-act', type=str, choices=('relu', 'lrelu'), default='lrelu', help='Activation to use in G and E')
-    parser.add_argument('--d-bn', type=str, choices=('batch', 'layer', 'instance', 'none'), default='none', help="Whether to use Normalization in D")
-    parser.add_argument('--d-act', type=str, choices=('relu', 'lrelu'), default='lrelu', help='Activation to use in D')
 
-    
-    parser.add_argument('--batch-size', type=int, default=32, help='Batch size')    
-    parser.add_argument('--lambda', type=float, dest='lambda_', default=0.1, help='weight of discriminator features when scoring')
+    parser.add_argument('run', help='path to run dir')
+
+    # model params
+    parser.add_argument('--batch-size', type=int, default=32, help='batch size')
+    parser.add_argument('--best', action='store_true', default=False, help='whether to use the early stopped model')
+    parser.add_argument('--lambda', type=float, dest='lambda_', nargs='+', default=default_lambdas, help='weight of discriminator features when scoring')
     
     args = parser.parse_args()
     main(args)
