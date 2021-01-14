@@ -4,7 +4,6 @@ os.environ['TF_CPP_MIN_LOG_LEVEL'] = '1'  # do not print tf INFO messages
 import argparse
 
 import tensorflow as tf
-# import tensorflow_addons as tfa
 import tensorflow.keras.backend as K
 from tensorflow.keras import layers as L
 from tensorflow.keras import optimizers as O
@@ -27,6 +26,10 @@ def main(args):
     # do not track lambda param, it can be changed after train
     exp = Experiment(args, ignore=('lambda_',))
     print(exp)
+
+    if exp.found:
+        print('Already exists: SKIPPING')
+        exit(0)
 
     np.random.seed(args.seed)
     tf.random.set_seed(args.seed)
@@ -62,8 +65,18 @@ def main(args):
     generator_encoder_optimizer = O.Adam(args.lr, beta_1=args.ge_beta1, beta_2=args.ge_beta2)
     discriminator_optimizer = O.Adam(args.lr, beta_1=args.d_beta1, beta_2=args.d_beta2)
 
+    # reference to the models to use in eval
+    generator_eval = generator
+    encoder_eval = encoder
+
     # for smoothing generator and encoder evolution
-    ema = tf.train.ExponentialMovingAverage(decay=args.ge_decay)
+    if args.ge_decay > 0:
+        ema = tf.train.ExponentialMovingAverage(decay=args.ge_decay)
+        generator_ema = tf.keras.models.clone_model(generator)
+        encoder_ema = tf.keras.models.clone_model(encoder)
+        
+        generator_eval = generator_ema
+        encoder_eval = encoder_ema
 
     # checkpointer
     checkpoint = tf.train.Checkpoint(generator=generator, encoder=encoder,
@@ -105,20 +118,21 @@ def main(args):
             if step == 1 or args.d_iter == 0:  # only for JIT compilation (tf.function) to work
                 d_train = True
                 ge_train = True
-            else:
+            elif args.d_iter:
                 n_iter = step % (abs(args.d_iter) + 1)  # can be in [0, d_iter]
                 d_train = (n_iter != 0) if (args.d_iter > 0) else (n_iter == 0)  # True in [1, d_iter]
                 ge_train = not d_train  # True when step == d_iter + 1
+            else:  # d_iter == None: dynamic adjustment
+                d_train = (scores['fake_score'] > 0) or (scores['real_score'] < 0)
+                ge_train = (scores['real_score'] > 0) or (scores['fake_score'] < 0)
 
             losses, scores = train_step(image_batch, generator, encoder, discriminator,
                                         generator_encoder_optimizer, discriminator_optimizer,
                                         d_train, ge_train, alpha=args.alpha, gp_weight=args.gp_weight)
 
             if (args.ge_decay > 0) and (step % 10 == 0):
-                ge_vars = generator.trainable_variables + encoder.trainable_variables
+                ge_vars = generator.variables + encoder.variables
                 ema.apply(ge_vars)  # update exponential moving average
-                for v in ge_vars:  # assign to each variable its exponential moving average
-                    v = ema.average(v)
 
             # tensor to numpy
             losses = {n: l.numpy() if l is not None else l for n, l in losses.items()}
@@ -129,13 +143,18 @@ def main(args):
             log = log.append(entry, ignore_index=True)
 
             if step % 100 == 0:
-                preview = video_saver.generate_and_save(generator, encoder)
+                if args.ge_decay > 0:
+                    ge_ema_vars = generator_ema.variables + encoder_ema.variables
+                    for v_ema, v in zip(ge_ema_vars, ge_vars):
+                        v_ema.assign(ema.average(v))
+                
+                preview = video_saver.generate_and_save(generator_eval, encoder_eval)
                 
             if step % 1000 == 0:
                 log.to_csv(log_file, index=False)
                 checkpoint.write(file_prefix=last_ckpt_path)
                 
-                auc, balanced_accuracy = evaluate(generator, encoder, discriminator_features,
+                auc, balanced_accuracy = evaluate(generator_eval, encoder_eval, discriminator_features,
                                                   test_dataset, test_labels,
                                                   patch_size=args.patch_size, lambda_=args.lambda_)
                                                   
@@ -209,7 +228,7 @@ if __name__ == '__main__':
     parser.add_argument('--alpha', type=float, default=1e-4, help='Consistency loss weight')
     parser.add_argument('--gp-weight', type=float, default=2.5, help='Gradient penalty weight')
     
-    parser.add_argument('--d-iter', type=int, default=1, help='Number of times D trains more than G and E (or viceversa using negative values; 0 = simultaneous step)')
+    parser.add_argument('--d-iter', type=int, default=None, help='Number of times D trains more than G and E (or viceversa using negative values; 0 = simultaneous step)')
     
     # other parameters
     parser.add_argument('--lambda', type=float, dest='lambda_', default=0.1, help='weight of discriminator features when scoring')
