@@ -86,26 +86,25 @@ def get_train_data(category, batch_size=32, image_size=128, patch_size=128, rota
         train_dataset = train_dataset.repeat(num_repeats)
 
         # apply random rotation
-        if rotation_range[0] != 0 or rotation_range[1] != 0:
-            if category in textures:  # for textures: rotate and crop without edges
-                def augmentation(x):  # slow computation, we will cache this
-                    return tf.py_function(random_rotation_crop_no_edges,
-                                          inp=[x, rotation_range, patch_size], Tout=tf.float32)
-            else:  # for objects: rotate (reflect edges), no crop
-                factor = (rotation_range[0] / 360., rotation_range[1] / 360.)
-                # fill_mode='nearest' is available only in tf-nightly (2.4.0)
-                augmentation = P.RandomRotation(factor, fill_mode='nearest', seed=seed) 
-            
-            train_dataset = train_dataset.shuffle(10000).batch(32)
-            train_dataset = train_dataset.map(augmentation, num_parallel_calls=AUTOTUNE)
-            train_dataset = train_dataset.unbatch()
-            
-            if category in textures: # for textures: cache the augmented dataset
-                print('Creating cache for dataset:', cache_file)
-                train_dataset = tqdm(train_dataset.as_numpy_iterator(), total=n_total)
-                train_dataset = np.stack(list(train_dataset))
-                np.save(cache_file, train_dataset)
-                train_dataset = tf.data.Dataset.from_tensor_slices(train_dataset)
+        if category in textures:  # for textures: rotate and crop without edges
+            def augmentation(x):  # slow computation, we will cache this
+                return tf.py_function(random_rotation_crop_no_edges,
+                                      inp=[x, rotation_range, patch_size], Tout=tf.float32)
+        else:  # for objects: rotate (reflect edges), no crop
+            factor = (rotation_range[0] / 360., rotation_range[1] / 360.)
+            # fill_mode='nearest' is available only in tf-nightly (2.4.0)
+            augmentation = P.RandomRotation(factor, fill_mode='nearest', seed=seed)
+
+        train_dataset = train_dataset.shuffle(10000).batch(32)
+        train_dataset = train_dataset.map(augmentation, num_parallel_calls=AUTOTUNE)
+        train_dataset = train_dataset.unbatch()
+
+        if category in textures: # for textures: cache the augmented dataset
+            print('Creating cache for dataset:', cache_file)
+            train_dataset = tqdm(train_dataset.as_numpy_iterator(), total=n_total)
+            train_dataset = np.stack(list(train_dataset))
+            np.save(cache_file, train_dataset)
+            train_dataset = tf.data.Dataset.from_tensor_slices(train_dataset)
     else:
         print('Loading dataset from cache:', cache_file)
         train_dataset = np.load(cache_file)
