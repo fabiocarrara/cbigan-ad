@@ -1,6 +1,7 @@
 imageio
 imageio-ffmpeg
 pandas
+seaborn
 sklearn
 tensorflow_addons
 tqdm

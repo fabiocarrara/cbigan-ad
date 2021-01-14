@@ -1,5 +1,8 @@
 import argparse
+import glob
+import os
 import re
+import numpy as np
 import pandas as pd
 
 import matplotlib.pyplot as plt
@@ -56,6 +59,9 @@ def plot_log(args):
             
             best_recon_file = exp.path_to(f'best_recon_{category}.png')
             best_recon = plt.imread(best_recon_file)
+
+            last_recon_file = exp.path_to(f'last_recon_{category}.png')
+            last_recon = plt.imread(last_recon_file)
             
             # prepare figure
             zoom = 0.7
@@ -107,10 +113,16 @@ def plot_log(args):
             
             # metrics
             metric_log.plot(x='step', y=['auc', 'balanced_accuracy'], ax=ax4)
+            best_recon_step = train_log[(train_log.step % 1000) == 0].images_reconstruction_loss.idxmin()
+            best_recon_step = train_log.loc[best_recon_step, 'step']
+            ax4.axvline(best_recon_step, color='black', lw=1)
             ax4.legend(loc='upper right', bbox_to_anchor=(1.0, -0.2))
             
-            # best reconstruction
-            ax5.imshow(best_recon)
+            
+            # best/last reconstruction
+            hw = best_recon.shape[1] // 2
+            recon = np.hstack((best_recon[:, :hw, :], last_recon[:, :hw, :]))
+            ax5.imshow(recon)
             ax5.margins(0)
             
             # params
@@ -126,19 +138,25 @@ def plot_log(args):
             plt.close(fig)
 
 
-def _get_scores(exps):
+def _get_scores(exps, best=False):
         
     metrics = expman.collect_all(exps, 'metrics_*.csv')
     
     fixed_cols = metrics.nunique() == 1
-    fixed_params = metrics.loc[0, fixed_cols]
+    # do not consider the following as fixed params
+    # (in the case there is only one run)
+    fixed_cols.category = False
+    fixed_cols.exp_id = False
+    fixed_cols.exp_name = False
     
+    fixed_params = metrics.loc[0, fixed_cols]
     
     # get variable cols & select the best based on metrics
     results = metrics.loc[:, ~fixed_cols]
-    best = results.groupby('exp_id').auc.idxmax()
-    results = results.loc[best]
-    
+    grouped = results.groupby('exp_id', sort=False)
+    results_idx = grouped.auc.idxmax() if best else grouped.apply(lambda x: x.index[-1])
+    results = results.loc[results_idx]
+
     # remove extra columns
     results = results.drop(columns=['exp_id', 'exp_name'])
     
@@ -149,12 +167,11 @@ def _get_scores(exps):
     results.type = pd.Categorical(results.type, ['texture', 'object', 'mean'])
     results.category = pd.Categorical(results.category, textures + objects + ['mean'])
     results = results.set_index(['type', 'category']).sort_index()
-    
 
     table = results.pivot_table(values=['balanced_accuracy', 'auc'], columns=['type', 'category'])
     
-    textures_mean = table['texture'].mean(axis=1)
-    objects_mean = table['object'].mean(axis=1)
+    textures_mean = table['texture'].mean(axis=1) if 'texture' in table else None
+    objects_mean = table['object'].mean(axis=1) if 'object' in table else None
     overall_mean = table.mean(axis=1)
     
     table.loc[:, ('texture', 'mean')] = textures_mean
@@ -170,24 +187,25 @@ def print_scores(args):
     exps = expman.gather(args.run)
     exps = expman.filter(args.filter, exps)
     
-    fixed_params, results, table = _get_scores(exps)
+    fixed_params, results, table = _get_scores(exps, args.best)
 
-    print('Common Parameters')
-    print('=================')
-    print(fixed_params)
-    print('=================')
-    print()
-    print('Run Metrics')
-    print('=================')
-    print(results)
-    print('=================')
-    print()
-    print('Best Metrics')
-    print('=================')
-    with pd.option_context('display.float_format', '{:.2f}'.format):
-        print(table)
-    print('=================')
-    print()
+    with pd.option_context('display.max_rows', None, 'display.max_columns', None, 'display.width', 500):
+      print('Common Parameters')
+      print('=================')
+      print(fixed_params)
+      print('=================')
+      print()
+      print('Run Metrics')
+      print('=================')
+      print(results)
+      print('=================')
+      print()
+      print('Best Metrics')
+      print('=================')
+      with pd.option_context('display.float_format', '{:.2f}'.format):
+          print(table)
+      print('=================')
+      print()
 
 
 def compare(args):
@@ -201,12 +219,70 @@ def compare(args):
     fixed_params1, results1, table1 = _get_scores(exps1)
     fixed_params2, results2, table2 = _get_scores(exps2)
     
-    with pd.option_context('display.float_format', '{:.2f}'.format):
-        print(table2)
-        print(table1)
-    with pd.option_context('display.float_format', '{:.1%}'.format):
-        print(table2 - table1)
+    with pd.option_context('display.max_rows', None, 'display.max_columns', None, 'display.width', 1000):
+        with pd.option_context('display.float_format', '{:.2f}'.format):
+            print('1]', args.run2)
+            print(table2)
+            print()
+            print('2]', args.run1)
+            print(table1)
+            print()
+        with pd.option_context('display.float_format', '{:.1%}'.format):
+            print('D] {} - {}'.format(args.run2, args.run1))
+            print(table2 - table1)
     
+
+def compare_videos(args):
+    exps = expman.gather(args.run)
+    exps = expman.filter(args.filter, exps)
+    exps = list(exps)
+
+    # get params and video paths
+    params = expman.collect_all(exps)
+    params['video'] = [glob.glob(e.path_to('*.mp4'))[0] for e in exps]
+    params = params.sort_values(['alpha', 'd_iter'], ascending=[False, True])
+
+    video_paths = params.video.values
+    video_labels = params.exp_name.values
+
+    # find best grid aspect ratio
+    n = len(video_paths)
+    square_side = np.ceil(np.sqrt(n)).astype(int)
+    nrows = np.arange(1, square_side + 1)
+    ncols = np.ceil(n / nrows)
+    aspect_ratios_per_nrows =  (6 / 7) * (ncols / nrows)
+    best = np.argmin(np.abs(aspect_ratios_per_nrows - (16 / 9)))
+    w = ncols[best].astype(int)
+    h = nrows[best].astype(int)
+
+    # build ffmpeg command
+    input_args = [f'-i {path}' for path in video_paths]
+    input_args = ' '.join(input_args)
+
+    pad_w, pad_h = 10, 30
+
+    filter_complex = [
+        f'[{i}:v] '
+        f'setpts=PTS-STARTPTS, '
+        f'pad=width=iw+{pad_w}: height=ih+{pad_h}: x={pad_w // 2}: y={pad_h}, '
+        f'drawtext=text=\'{label}\': fontcolor=white: fontsize=24: x=(w-tw)/2: y=({pad_h}-th)/2 '
+        f'[a{i}]' for i, label in enumerate(video_labels)]
+
+    xstack_inputs = ''.join(f'[a{i}]' for i in range(n))
+
+    widths = ['0'] + [f'w{i}' for i in range(w - 1)]
+    heights = ['0'] + [f'h{i}' for i in range(h - 1)]
+
+    xstack_layout = [ '+'.join(widths[:i+1]) + '_' + '+'.join(heights[:j+1]) for j in range(h) for i in range(w) ]
+    xstack_layout = '|'.join(xstack_layout)
+
+    xstack_filter = f'{xstack_inputs}xstack=inputs={n}: layout={xstack_layout}[out]'
+
+    filter_complex += [xstack_filter]
+    filter_complex = ';'.join(filter_complex)
+
+    cmd = f'ffmpeg {input_args} -filter_complex "{filter_complex}" -map "[out]" -c:v hevc -crf 23 -preset fast {args.output}'
+    print(cmd)
 
 
 if __name__ == '__main__':
@@ -221,12 +297,18 @@ if __name__ == '__main__':
     
     parser_score = subparsers.add_parser('score')
     parser_score.add_argument('run', default='runs/')
+    parser_score.add_argument('--best', action='store_true', default=False)
     parser_score.set_defaults(func=print_scores)
     
     parser_cmp = subparsers.add_parser('cmp')
     parser_cmp.add_argument('run1', default='runs/')
     parser_cmp.add_argument('run2', default='runs/')
     parser_cmp.set_defaults(func=compare)
+
+    parser_vid = subparsers.add_parser('video')
+    parser_vid.add_argument('run', default='runs/')
+    parser_vid.add_argument('-o', '--output', default='vid_cmp.mp4')
+    parser_vid.set_defaults(func=compare_videos)
     
     args = parser.parse_args()
     args.func(args)
