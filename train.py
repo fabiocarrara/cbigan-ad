@@ -217,18 +217,18 @@ if __name__ == '__main__':
     parser.add_argument('--d-act', type=str, choices=('relu', 'lrelu'), default='lrelu', help='Activation to use in D')
     
     # optimizer params
-    parser.add_argument('--n-batches', type=int, default=200_000, help='Number of batches processed in the training phase')
+    parser.add_argument('--n-batches', type=int, default=1_200_000, help='Number of batches processed in the training phase')
     parser.add_argument('--batch-size', type=int, default=32, help='Batch size')
     parser.add_argument('--lr', type=float, default=1e-4, help='Learning rate')
     parser.add_argument('--ge-beta1', type=float, default=0, help='Beta_1 value of Adam for G and E')
-    parser.add_argument('--ge-beta2', type=float, default=0.099, help='Beta_2 value of Adam for G and E')
+    parser.add_argument('--ge-beta2', type=float, default=0.1, help='Beta_2 value of Adam for G and E')
     parser.add_argument('--d-beta1', type=float, default=0, help='Beta_1 value of Adam for D')
-    parser.add_argument('--d-beta2', type=float, default=0.909, help='Beta_2 value of Adam for D')
+    parser.add_argument('--d-beta2', type=float, default=0.9, help='Beta_2 value of Adam for D')
     
-    parser.add_argument('--alpha', type=float, default=1e-4, help='Consistency loss weight')
-    parser.add_argument('--gp-weight', type=float, default=2.5, help='Gradient penalty weight')
+    parser.add_argument('--alpha', type=float, default=1e-5, help='Consistency loss weight')
+    parser.add_argument('--gp-weight', type=float, default=10, help='Gradient penalty weight')
     
-    parser.add_argument('--d-iter', type=int, default=None, help='Number of times D trains more than G and E (or viceversa using negative values; 0 = simultaneous step)')
+    parser.add_argument('--d-iter', type=int, default=5, help='Number of times D trains more than G and E (or viceversa using negative values; 0 = simultaneous step)')
     
     # other parameters
     parser.add_argument('--lambda', type=float, dest='lambda_', default=0.1, help='weight of discriminator features when scoring')
