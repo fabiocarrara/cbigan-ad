@@ -44,10 +44,9 @@ def plot_log(args):
     formatter = lambda x, pos: f'{(x // 1000):g}k' if x >= 1000 else f'{x:g}'
     formatter = FuncFormatter(formatter)
 
-    exps = expman.gather(args.run)
-    exps = expman.filter(args.filter, exps)
-    exps = sorted(exps, key=lambda exp: exp.params.category)
-    
+    exps = expman.gather(args.run).filter(args.filter)
+    exps = exps.sort(key=lambda exp: exp.params.category)
+
     with PdfPages(args.output) as pdf:
         for exp in tqdm(exps):
             category = exp.params.category
@@ -140,7 +139,7 @@ def plot_log(args):
 
 def _get_scores(exps, best=False):
         
-    metrics = expman.collect_all(exps, 'metrics_*.csv')
+    metrics = exps.collect('metrics_*.csv')
     
     fixed_cols = metrics.nunique() == 1
     # do not consider the following as fixed params
@@ -184,8 +183,7 @@ def _get_scores(exps, best=False):
 
 
 def print_scores(args):
-    exps = expman.gather(args.run)
-    exps = expman.filter(args.filter, exps)
+    exps = expman.gather(args.run).filter(args.filter)
     
     fixed_params, results, table = _get_scores(exps, args.best)
 
@@ -210,11 +208,8 @@ def print_scores(args):
 
 def compare(args):
     
-    exps1 = expman.gather(args.run1)
-    exps2 = expman.gather(args.run2)
-    
-    exps1 = expman.filter(args.filter, exps1)
-    exps2 = expman.filter(args.filter, exps2)
+    exps1 = expman.gather(args.run1).filter(args.filter)
+    exps2 = expman.gather(args.run2).filter(args.filter)
     
     fixed_params1, results1, table1 = _get_scores(exps1)
     fixed_params2, results2, table2 = _get_scores(exps2)
@@ -233,12 +228,10 @@ def compare(args):
     
 
 def compare_videos(args):
-    exps = expman.gather(args.run)
-    exps = expman.filter(args.filter, exps)
-    exps = list(exps)
+    exps = expman.gather(args.run).filter(args.filter)
 
     # get params and video paths
-    params = expman.collect_all(exps)
+    params = exps.collect()
     params['video'] = [glob.glob(e.path_to('*.mp4'))[0] for e in exps]
     params = params.sort_values(['alpha', 'd_iter'], ascending=[False, True])
 

@@ -120,7 +120,7 @@ def main(args):
     # checkpointer
     checkpoint = tf.train.Checkpoint(generator=generator, encoder=encoder, discriminator=discriminator)
     ckpt_suffix = 'best' if args.best else 'last'
-    ckpt_path = exp.ckpt(f'ckpt_{params.category}_{ckpt_suffix}')
+    ckpt_path = exp.path_to(f'ckpt/ckpt_{params.category}_{ckpt_suffix}')
     checkpoint.read(ckpt_path).expect_partial()
                                      
     discriminator_features = get_discriminator_features_model(discriminator)

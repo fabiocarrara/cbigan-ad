@@ -83,12 +83,14 @@ def main(args):
                                      discriminator=discriminator,
                                      generator_encoder_optimizer=generator_encoder_optimizer,
                                      discriminator_optimizer=discriminator_optimizer)
-    best_ckpt_path = exp.ckpt(f'ckpt_{args.category}_best')
-    last_ckpt_path = exp.ckpt(f'ckpt_{args.category}_last')
+    best_ckpt_path = exp.path_to(f'ckpt/ckpt_{args.category}_best')
+    last_ckpt_path = exp.path_to(f'ckpt/ckpt_{args.category}_last')
 
     # log stuff
-    log, log_file = exp.require_csv(f'log_{args.category}.csv.gz')
-    metrics, metrics_file = exp.require_csv(f'metrics_{args.category}.csv')
+    log_file = exp.path_to(f'log_{args.category}.csv.gz')
+    metrics_file = exp.path_to(f'metrics_{args.category}.csv')
+    log = pd.DataFrame()
+    metrics = pd.DataFrame()
     best_metric = 0.
     best_recon = float('inf')
     best_recon_file = exp.path_to(f'best_recon_{args.category}.png')
