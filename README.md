@@ -25,12 +25,16 @@ python train.py -h
 
 
 ## Reference
-**Combining GANs and AutoEncoders for Efficient Anomaly Detection** [[arXiv](https://arxiv.org/abs/2011.08102)]
-Fabio Carrara, Giuseppe Amato, Luca Brombin, Fabrizio Falchi, Claudio Gennaro
+**Combining GANs and AutoEncoders for Efficient Anomaly Detection**.
+_Fabio Carrara, Giuseppe Amato, Luca Brombin, Fabrizio Falchi, Claudio Gennaro._
+In 2020 25th International Conference on Pattern Recognition (ICPR) (pp. 3939-3946). IEEE.
+[[arXiv](https://arxiv.org/abs/2011.08102), [DOI](https://doi.org/10.1109/ICPR48806.2021.9412253)]
 
-    @article{carrara2020combining,
-      title={Combining GANs and AutoEncoders for Efficient Anomaly Detection},
+    @inproceedings{carrara2021combining,
+      title={Combining gans and autoencoders for efficient anomaly detection},
       author={Carrara, Fabio and Amato, Giuseppe and Brombin, Luca and Falchi, Fabrizio and Gennaro, Claudio},
-      journal={arXiv preprint arXiv:2011.08102},
-      year={2020}
+      booktitle={2020 25th International Conference on Pattern Recognition (ICPR)},
+      pages={3939--3946},
+      year={2021},
+      organization={IEEE}
     }
